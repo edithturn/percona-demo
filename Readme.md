@@ -195,3 +195,48 @@ kubectl port-forward svc/monitoring-service 8443:8443
 ```
 
 Then open PMM at `https://localhost:8443`.
+
+---
+
+## 8. Connect PostgreSQL to PMM (pg-pmm-secret)
+
+The `pg-pmm-secret.yaml` creates a secret with your PMM server token so the Percona Operator can register the PostgreSQL cluster with PMM for monitoring.
+
+**Never paste your token into the repo.** Use this process:
+
+### Generate a service account and token
+
+PMM uses Grafana service account tokens for authentication. These tokens are randomly generated strings that serve as alternatives to API keys or basic authentication passwords.
+
+Here's how to generate a service account token:
+
+1. Log in to PMM.
+2. From the side menu, click **Users and access** → **Service accounts**.
+3. Click **Add service account**. Specify a unique name for your service account, select a role from the drop-down menu, and click **Create** to display your newly created service account.
+4. Click **Add service account token**.
+5. In the pop-up dialog, provide a name for the new service token, or leave the field empty to generate an automatic name.
+6. Optionally, set an expiration date for the service account token. PMM cannot automatically rotate expired tokens, which means you will need to manually update the PMM-agent configuration file with a new service account token. Permanent tokens, on the other hand, remain valid indefinitely unless specifically revoked.
+7. Click **Generate token**. A pop-up window will display the new token, which usually has a `glsa_` prefix.
+8. Click **Copy your service token to the clipboard** and store it securely. You can now use this token for authentication in PMM API calls or in your pmm-agent configuration.
+
+![PMM service account token](img/pmm.png)
+
+### Step 1: Store your token in a variable (one-time setup)
+
+Create `.pmm-secrets` with your token from the step above:
+
+```bash
+echo 'export PMM_SERVER_TOKEN="your-token-here"' > .pmm-secrets
+```
+
+`.pmm-secrets` is in `.gitignore` — it will never be committed.
+
+### Step 2: Apply the secret
+
+`envsubst` substitutes the token from `.pmm-secrets` into the template. The result is piped to `kubectl apply` — no file with the token is ever written to disk.
+
+```bash
+source .pmm-secrets && envsubst < pg-pmm-secret.yaml | kubectl apply -f - -n demo-db
+```
+
+**Summary:** Token lives only in `.pmm-secrets` → `envsubst` substitutes it → `kubectl` applies. No token is ever committed.
