@@ -1,0 +1,238 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: loadgen-secret
+type: Opaque
+stringData:
+  GITHUB_TOKEN: ""
+  MONGODB_PASSWORD: password
+  PG_PASSWORD: password
+  MYSQL_PASSWORD: password
+  VALKEY_PASSWORD: ""
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loadgen-config
+data:
+  GITHUB_ORG: percona
+  CONTROL_PANEL_PORT: "3001"
+  LOAD_MYSQL: "true"
+  LOAD_POSTGRES: "true"
+  LOAD_MONGODB: "true"
+  VALKEY_ADDR: valkey-service
+  VALKEY_PORT: "6379"
+  VALKEY_DB: "0"
+  MONGODB_USER: databaseAdmin
+  MONGODB_DB: dataset
+  MONGODB_HOST: "localhost"
+  MONGODB_PORT: "27017"
+  PG_USER: postgres
+  PG_DB: dataset
+  PG_HOST: "localhost"
+  PG_PORT: "5432"
+  MYSQL_USER: root
+  MYSQL_DB: dataset
+  MYSQL_HOST: "localhost"
+  MYSQL_PORT: "3306"
+  DATASET_LOAD_TYPE: "csv" # github_chunks, github_consistent or csv
+  DATASET_DEMO_CSV_PULLS: "https://github.com/dbazhenov/github-stat/raw/refs/heads/main/data/csv/pulls.csv.zip"
+  DATASET_DEMO_CSV_REPOS: "https://github.com/dbazhenov/github-stat/raw/refs/heads/main/data/csv/repositories.csv.zip"
+  DELAY_MINUTES: "3"
+  DEBUG: "true"
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: valkey-pv
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Delete
+  hostPath:
+    path: "/mnt/data/valkey"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: valkey-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkey
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: valkey
+  template:
+    metadata:
+      labels:
+        app: valkey
+    spec:
+      containers:
+      - name: valkey
+        image: valkey/valkey:9
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "300m"
+          limits:
+            memory: "1Gi"
+            cpu: "600m"
+        env:
+        - name: ALLOW_EMPTY_PASSWORD
+          value: "yes"
+        ports:
+        - containerPort: 6379
+        volumeMounts:
+        - name: valkey-data
+          mountPath: /data
+      volumes:
+      - name: valkey-data
+        persistentVolumeClaim:
+          claimName: valkey-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey-service
+spec:
+  selector:
+    app: valkey
+  ports:
+    - protocol: TCP
+      port: 6379
+      targetPort: 6379
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgen-web
+  annotations:
+    kubernetes.io/change-cause: "Update to latest image"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loadgen-web
+  template:
+    metadata:
+      labels:
+        app: loadgen-web
+      annotations:
+        kubernetes.io/change-cause: "Update to latest image"
+    spec:
+      containers:
+      - name: loadgen-web
+        image: dbazhenov/demo_app_web:0.2.0
+        imagePullPolicy: Always
+        envFrom:
+        - configMapRef:
+            name: loadgen-config
+        - secretRef:
+            name: loadgen-secret
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "300m"
+          limits:
+            memory: "1Gi"
+            cpu: "600m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loadgen-web-service
+spec:
+  type: NodePort
+  selector:
+    app: loadgen-web
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 3001
+      nodePort: 30080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgen-dataset
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loadgen-dataset
+  template:
+    metadata:
+      labels:
+        app: loadgen-dataset
+    spec:
+      containers:
+      - name: loadgen-dataset
+        image: dbazhenov/demo_app_dataset:0.2.0
+        imagePullPolicy: Always
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1"
+          limits:
+            memory: "2Gi"
+            cpu: "1"
+        envFrom:
+        - configMapRef:
+            name: loadgen-config
+        - secretRef:
+            name: loadgen-secret
+        env:
+        - name: DEBUG
+          value: "false"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loadgen-load
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: loadgen-load
+  template:
+    metadata:
+      labels:
+        app: loadgen-load
+    spec:
+      containers:
+      - name: loadgen-load
+        image: dbazhenov/demo_app_load:0.2.0
+        imagePullPolicy: Always
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "1"
+          limits:
+            memory: "6Gi"
+            cpu: "3"
+        envFrom:
+        - configMapRef:
+            name: loadgen-config
+        - secretRef:
+            name: loadgen-secret
+        env:
+        - name: LOAD_MYSQL
+          value: "false"
+        - name: LOAD_POSTGRES
+          value: "true"
+        - name: LOAD_MONGODB
+          value: "false"
+
