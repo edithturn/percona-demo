@@ -1,6 +1,6 @@
 # Percona Operator + PMM: Full-Stack PostgreSQL Demo
 
-A hands-on guide to deploying the Percona PostgreSQL Operator with Percona Monitoring and Management (PMM) on k3s, from cluster setup to monitoring.
+A hands-on demo that shows the impact of Percona PostgreSQL Operator and PMM on a real application workload running on k3s, from cluster setup and database deployment to load generation, monitoring, and visibility into system behavior.
 
 ---
 
@@ -171,14 +171,27 @@ kubectl get pods -l app.kubernetes.io/name=pmm
 
 ### Step 7: Access PMM Server
 
-Standard Kubernetes clusters provide several options for accessing PMM Server:
+Standard Kubernetes clusters provide several options for accessing PMM Server.
+
+**Option A: Inspect the service (recommended for NodePort)**
+
+List the service details to see which NodePort was assigned:
 
 ```bash
-# If using ClusterIP (default)
-kubectl port-forward svc/monitoring-service 8443:8443
-
-# If using NodePort
-kubectl get svc monitoring-service -o jsonpath='{.spec.ports[0].nodePort}'
+kubectl describe service monitoring-service
 ```
 
-Then open PMM in your browser at `https://localhost:8443` (or the NodePort URL if applicable).
+Look for the `NodePort` lines in the output. The PMM Helm chart typically creates a NodePort service with two ports:
+
+- **HTTP** (port 80 → NodePort, e.g. 30471) — use this to access PMM in your browser
+- **HTTPS** (port 443 → NodePort, e.g. 30967) — alternative secure access
+
+**Why port 30471?** When the service type is `NodePort`, Kubernetes assigns a port in the range 30000–32767 on each cluster node. The exact number (e.g. 30471) is assigned at creation time and can differ per cluster. You can reach PMM at `http://<node-ip>:30471` or `http://localhost:30471` if your node is local. Use the port shown in your `kubectl describe` output.
+
+**Option B: Port-forward (ClusterIP)**
+
+```bash
+kubectl port-forward svc/monitoring-service 8443:8443
+```
+
+Then open PMM at `https://localhost:8443`.
